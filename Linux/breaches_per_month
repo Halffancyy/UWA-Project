@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# Check if the number of arguments is correct.
+if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 <textfile>" > /dev/stderr
+    exit 1
+fi
+
+# Check if the file exists and has contents.
+if [[ ! -s $1 ]]; then
+    echo "The file $1 does not exist or has zero length" > /dev/stderr
+    exit 1
+fi
+
+input_clean_file="$1"
+
+# Define the expression corresponding to the month.
+corresponding_months=("Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec")
+
+# Declare an associative array to store the incident counts for each month.
+declare -A incident_counts
+
+gawk -F '\t' -v OFS='\t' -v months="${corresponding_months[*]}" '
+
+BEGIN{
+    
+    # Define the order of months.
+    split(months, month_order, " ");
+
+    # Initialize incident_counts for each month to 0.
+    for (i in month_order) 
+        {incident_counts[month_order[i]] = 0}
+}
+
+# Use gawk to compute the incident counts per month.
+NR>1 {
+    month = month_order[$6]
+    incident_counts[month]++
+} 
+
+END {
+
+    # Compute the median.
+    num_values = asort(incident_counts, sorted_months)
+
+    # Results of categorical consideration of median.
+    if (num_values % 2 == 0) {
+        median_index1 = num_values / 2
+        median_index2 = median_index1 + 1
+        median = (sorted_months[median_index1] + sorted_months[median_index2]) / 2
+    } else {
+        median_index = int(num_values / 2) + 1
+        median = sorted_months[median_index]
+    }
+    print "Median: " median
+
+    # Compute the median absolute deviation (MAD).
+    for (i = 1; i <= num_values; i++) {
+        deviations[i] = sorted_months[i] - median
+        if (deviations[i] < 0) deviations[i] = -deviations[i]
+    }
+    asort(deviations,sorted_deviations)
+
+    # Results of categorical consideration of MAD.
+    if (num_values % 2 == 0) {
+        mad_index1 = num_values / 2
+        mad_index2 = mad_index1 + 1
+        mad = (sorted_deviations[mad_index1] + sorted_deviations[mad_index2]) / 2
+    } else {
+        mad_index = int(num_values / 2) + 1
+        mad = sorted_deviations[mad_index]
+    }
+    print "MAD: " mad
+
+    # Print the table of months with incident counts and indicators.
+    for (i = 1; i <= num_values; i++) {
+        month = month_order[i]
+        incidents = incident_counts[month]
+
+        # The indicator is determined according to the deviation of the number of incidents from the median and MAD.
+        indicator = (incidents >= median + mad) ? "++" : ((incidents <= median - mad) ? "--" : "")
+        
+        printf "%s\t%d\t%s\n", month, incidents, indicator
+    }
+}' "$input_clean_file"

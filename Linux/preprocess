@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# Check if the number of arguments is correct.
+if [[ $# -ne 1 ]]; then
+    echo "Usage: $0 <textfile>" > /dev/stderr
+    exit 1
+fi
+
+# Check the file exist and it has contents.
+if [[ ! -s $1 ]]; then
+    echo "The file $1 does not exist or has zero lenth" > /dev/stderr
+    exit 1
+fi
+
+# Replaces leading and trailing blank characters in a string with an empty string (turns structured text into free text).
+free_text(){
+    local var="$*"
+    var=$(echo "$var" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    echo -n "$var"
+}
+
+# Extract the contents of the fourth column to add a month column and a year column.
+extract_month_year(){
+    local date="$(free_text "$1")"
+    local month=""
+    local day=""
+    local year=""
+
+    # Check if the variable $date contains the - character, i.e. if it represents a date range.
+    if [[ "$date" == *-* ]]; then
+        # Processing date range.
+        # Extraction Start Date.
+        local start_date=$(free_text "${date%%-*}") 
+        month=$(awk -F'/' '{print $1}' <<< "$start_date")
+        day=$(awk -F'/' '{print $2}' <<< "$start_date")
+        year=$(awk -F'/' '{print $3}' <<< "$start_date")
+    else
+        # Processing individual dates.
+        month=$(awk -F'/' '{print $1}' <<< "$date")
+        day=$(awk -F'/' '{print $2}' <<< "$date")
+        year=$(awk -F'/' '{print $3}' <<< "$date")
+    fi
+
+    # Valid month and day.
+    if [[ ${month#0} -ge 1 && ${month#0} -le 12 ]] && [[ ${day#0} -ge 1 && ${day#0} -le 31 ]]; then
+        echo -n "$month $year"
+    fi
+}
+
+# Clean the Type of Breach column.
+clean_breach_type(){
+    local breach_type="$1"
+    local cleaned_breach_type="${breach_type%%[,/]*}"
+    printf "%s" "$cleaned_breach_type"
+}
+
+# Main script
+preprocess(){
+    local input_file="$1"
+    # Read the input file line by line.
+    local is_first_line=true
+    while IFS=$'\t' read -r name state affected date breach_type _ _; do
+        name=$(free_text "${name}")
+        state=$(free_text "${state}")
+        affected=$(free_text "${affected}")
+        date=$(free_text "${date}")
+        breach_type=$(free_text "${breach_type}")
+        
+        # Drop rows with erroneous date.
+        if [[ -z "$name" || -z "$state" || -z "$affected" || -z "$date" || -z "$breach_type" ]]; then
+            continue
+        fi
+
+        # Add month and year column.
+        month=$(extract_month_year "$date")
+        year=$(extract_month_year "$date")
+
+        # Print the column name of the first line of the output file.
+        if [[ "$is_first_line" = true ]]; then
+            printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "Name_of_Covered_Entity" "State" "Individuals_Affected" "Date_of_Breach" "Type_of_Breach" "Month" "Year"
+            is_first_line=false
+        
+        else
+
+            # Extract month from the month_year string.
+            month=$(awk '{print $1}' <<< "$month")
+            # Extract year from the month_year string.
+            year=$(awk '{print $2}' <<< "$year")
+
+            # Adjusting the format of the year.
+            if [[ ${#year} -eq 2 ]]; then
+                if [[ ${year#0} -lt 23 ]]; then
+                    year="20${year}"
+                else
+                    year="19${year}"
+                fi
+            fi
+
+            # Clean the breach type.
+            cleaned_breach_type=$(clean_breach_type "$breach_type")
+            
+            printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "${name}" "${state}" "${affected}" "${date}" "${cleaned_breach_type}" "${month#0}" "${year}"
+    fi
+    done < $(free_text "$input_file") 
+}
+
+# Preprocess the input file.
+preprocess "$1"
+
