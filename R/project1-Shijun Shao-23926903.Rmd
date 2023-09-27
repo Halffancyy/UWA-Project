@@ -1,0 +1,382 @@
+---
+title: "Project1"
+author: "Shijun SHAO (23926903)"
+date: "2023-08-23"
+output: html_document
+---
+
+YouTube Video Link: https://youtu.be/2WMyCxJTeZk
+
+## Part 1
+## Introduction to YouTube dataset
+
+This document introduces the YouTube dataset available on Kaggle, offering a comprehensive overview of global YouTube statistics for 2023. The dataset includes rankings, YouTuber details, video metrics, channel characteristics, and demographic information. Access the dataset at **Global YouTube Statistics 2023**.
+https://www.kaggle.com/datasets/nelgiriyewithana/global-youtube-statistics-2023
+
+## Part 2
+## Data loading, overview and set up
+
+2.1 Load libraries
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(leaflet)
+```
+
+2.2 Load the main data
+```{r}
+youtube <- read.csv("D:/WA/Study/2023 S2/CITS4009/Project/youtube_UTF_8.csv")
+```
+
+2.3 Using str to analyze the data
+```{r echo=T, results='hide'}
+str(youtube)
+```
+Run the str(youtube) function to display the structure of the YouTube dataset, the names of the data types of the columns, and the first few values of each column. And we can use this code to get a basic overview of the data after each run of R.
+
+2.4 Using summary to analyze the data
+```{r echo=T, results='hide'}
+summary(youtube)
+```
+Use summary(youtube) to see the distribution of each variable in the YouTube dataset, such as the minimum and maximum values for each column, and to identify possible outliers.
+
+2.5 Viewing the first ten observations
+```{r echo=T, results='hide'}
+head(youtube)
+```
+Run head(youtube) to see the first six rows of data samples for each column of the YouTube dataset.
+
+## Part 3
+## Cleaning
+
+3.1 Harmonize the formatting of column names
+```{r}
+colnames(youtube) <- gsub("[^[:alnum:]]", " ", colnames(youtube))
+colnames(youtube) <- gsub("(^|\\s)([[:alnum:]])", "\\U\\1\\E\\U\\2", colnames(youtube), perl = TRUE)
+```
+
+3.2 Replace all NAN, nan, and 0 in the dataset with NA
+```{r}
+youtube <- youtube %>%
+  mutate_all(~ ifelse(toupper(.) %in% c("NAN", "0"), NA, .))
+```
+
+3.3 Check how many NAs are in each column
+```{r}
+apply(is.na(youtube), 2, sum)
+```
+
+3.4 Processing NA values
+```{r}
+# Set the threshold for NA values
+threshold <- 0.6
+
+# Filter out rows with excessive NA values in any column
+youtube <- youtube %>%
+  filter(!rowSums(is.na(.)) > threshold * ncol(.))
+
+# Replace NA values in numeric columns with mean if less than 60% NA in the row
+num_cols <- names(youtube)[sapply(youtube, function(x) is.numeric(x))]
+na_col_count <- colSums(is.na(youtube[num_cols]))
+replace_cols <- num_cols[na_col_count < threshold * nrow(youtube)]
+
+for (col in replace_cols) {
+  mean_val <- mean(youtube[[col]], na.rm = TRUE)
+  youtube[is.na(youtube[[col]]), col] <- mean_val
+}
+
+# Replace NA values in character columns with "Missing"
+youtube <- youtube %>%
+  mutate(across(where(is.character), 
+                ~ ifelse(is.na(.), "Missing", .)))
+```
+
+3.5 Delete rows with unreasonable years
+```{r}
+youtube <- youtube %>%
+  filter(`Created Year` >= 2005)
+```
+Because YouTube was created in 2005, data prior to 2005 is invalid.
+
+3.6 Ensure that the highest earnings are greater than the lowest earnings
+```{r}
+# When the value in the Highest Monthly Earnings column is less than the value in the Lowest Monthly Earnings column, change both columns to zero.
+youtube$`Highest Monthly Earnings`[youtube$`Highest Monthly Earnings` < youtube$`Lowest Monthly Earnings`] <- 0
+youtube$`Lowest Monthly Earnings`[youtube$`Highest Monthly Earnings` < youtube$`Lowest Monthly Earnings`] <- 0
+
+# When the value in the Highest Yearly Earnings column is less than the value in the Lowest Yearly Earnings column, change both columns to zero.
+youtube$`Highest Yearly Earnings`[youtube$`Highest Yearly Earnings` < youtube$`Lowest Yearly Earnings`] <- 0
+youtube$`Lowest Yearly Earnings`[youtube$`Highest Yearly Earnings` < youtube$`Lowest Yearly Earnings`] <- 0
+```
+This action safeguards against errors arising from earlier transformations, like converting 0 values to NA and replacing some with means. It also reduces outlier influence in the dataset, ensuring more accurate analysis. In essence, it maintains data consistency, appropriately represents scenarios with no earnings, and enhances overall data quality for meaningful insights.
+
+## Part 4
+## Including Plots
+
+4.1 Use a bar chart to show the Youtubers with the highest video views rankings
+```{r}
+# Filter the data of the top 15 YouTubers in Video Views Rank 
+high_rank_youtubers <- youtube[youtube$`Video Views Rank` <= 15, ]
+
+# Create a bar plot
+ggplot(high_rank_youtubers, aes(x = reorder(Youtuber, `Video Views Rank`), y = `Video Views Rank`, fill = `Video Views Rank`)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Youtubers with High Video View Rank",
+       x = "Youtuber",
+       y = "Video Views Rank") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+        axis.title = element_text(size = 14),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_gradient(low = "skyblue", high = "darkblue") 
+```
+
+The bar chart shows the top 15 YouTubers according to the "Video Views Rank" This serves multiple purposes:
+Identify the Leaders: For marketers or content creators looking to collaborate, it's a quick way to identify who is leading the pack in terms of video views.
+Trends: If the top-ranked YouTubers belong to a specific category, this may reveal patterns in the types of videos that are most popular.
+Target Recognition: Companies can use this information to find partners who might work with influencers.
+
+4.2 Use box plots to analyze Subscribers and Video Views with Category
+```{r}
+# Calculate the lower and upper quartiles for Subscribers
+lower_subscribers <- quantile(youtube$Subscribers, 0.25) - 1.5 * IQR(youtube$Subscribers)
+upper_subscribers <- quantile(youtube$Subscribers, 0.75) + 1.5 * IQR(youtube$Subscribers)
+
+# Calculate the lower and upper quartiles for Video Views
+lower_video_views <- quantile(youtube$`Video Views`, 0.25) - 1.5 * IQR(youtube$`Video Views`)
+upper_video_views <- quantile(youtube$`Video Views`, 0.75) + 1.5 * IQR(youtube$`Video Views`)
+
+# Filter the data to remove extreme outliers for Subscribers and Video Views
+youtube_filtered <- youtube %>%
+  filter(Subscribers >= lower_subscribers, Subscribers <= upper_subscribers,
+         `Video Views` >= lower_video_views, `Video Views` <= upper_video_views)
+
+# Create a box plot for Subscribers with grouping by Category
+ggplot(youtube_filtered, aes(x = Category, y = Subscribers)) +
+  geom_boxplot(fill = "skyblue", color = "blue") +
+  labs(x = "Category", y = "Subscribers") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Distribution of Subscribers by Category") +
+  theme(plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        axis.title = element_text(size = 14))
+
+# Create a box plot for Video Views with grouping by Category
+ggplot(youtube_filtered, aes(x = Category, y = `Video Views`)) +
+  geom_boxplot(fill = "skyblue", color = "blue") +
+  labs(x = "Category", y = "Video Views") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Distribution of Video Views by Category") +
+  theme(plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        axis.title = element_text(size = 14))
+```
+
+Create these box plots to better compare key metrics, "Subscribers" and "Video Views," across different content categories.
+The rationale behind this analysis is to gain insights into YouTube content strategy. By examining how these metrics vary across categories, content creators and marketers can optimize their strategies. These box plots also serve as a visual tool for exploratory data analysis, helping identify trends and potential outliers.
+In summary, these box plots provide a clear overview of how subscribers and video views are distributed within various content categories on YouTube, aiding in data-driven decision-making for content creators and marketers.
+
+4.3 Use histogram charts to analyze YouTube video uploads
+```{r}
+# Remove rows with non-infinite values in the "Uploads" column
+youtube_cleaned <- youtube %>%
+  filter(is.finite(Uploads))
+
+# Create a histogram
+ggplot(youtube) +
+  geom_histogram(mapping=aes(x=Uploads), fill = "skyblue", color = "blue", bins = 50, na.rm = TRUE) +
+  xlim(boxplot.stats(youtube$Uploads)$stats[1], boxplot.stats(youtube$Uploads)$stats[4]) +
+  labs(title = "Distribution of Uploads on YouTube",
+       x = "Uploads",
+       y = "Frequency") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16),
+        axis.text.x = element_text(face = "bold", angle = 45, hjust = 1, size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 14))
+```
+
+This histogram visualizes the distribution of YouTube channel upload counts.
+
+The purpose of this histogram is to provide insight into the distribution of YouTube channel upload activity. It allows us to understand how many channels fall into different ranges of upload counts. This information is valuable for various analytics and decision-making processes related to YouTube content creators and their activities.
+
+By visualizing the upload distribution, we can identify common patterns, outliers, or trends in the data. For example, we can determine if most channels have similar upload counts or if there are channels with particularly high or low upload counts. This information is useful for content creators, marketers, or researchers interested in the state of YouTube content.
+
+4.4 Use a scatter plot to analyze the relationship between subscripers and video views
+```{r}
+# Create a scatter plot of Subscribers vs Video Views
+ggplot(youtube_filtered, aes(x = `Video Views`, y = Subscribers)) +
+  geom_point(color = "skyblue", alpha = 0.7) +
+  labs(title = "Subscribers vs Video Views on YouTube",
+       x = "Video Views",
+       y = "Subscribers") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+        axis.title = element_text(size = 14))
+```
+
+This chart is mainly used to see if there is any relationship between the number of views of a video on YouTube and the number of subscribers. Simply put, if you're a video creator, you definitely want to know if more subscribers lead to more views. This way you'll have a clearer idea of which area you should focus on, whether it's increasing the number of subscribers or focusing on increasing the number of views on your videos. This chart will help you quickly see if there's an obvious connection between the two.
+
+4.5 Use a heatmap to visualize the geographic distribution of data points
+```{r}
+# Create a heatmap of Latitude and Longitude using hexagons
+ggplot(youtube, aes(x = Longitude, y = Latitude)) +
+  geom_hex(bins = 50, fill = "skyblue") +
+  labs(title = "YouTube Data Set - Geographic Heatmap",
+       x = "Longitude",
+       y = "Latitude") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+        axis.title = element_text(size = 14))
+```
+
+This heatmap is actually designed to show at a glance where there is more YouTube activity and where there is less. With this chart, it's easier to know in which areas more people are watching YouTube or making YouTube videos. This way, if you're a video creator or analyst, you'll have a clearer idea of which places to focus on, where the market is bigger or where there's a greater need for content. This is helpful in making decisions and analyzing.
+
+4.6 Mapping to analyze YouTube subscriptions in relation to geographic distribution
+```{r}
+world_map <- map_data("world")
+ggplot() +
+  geom_polygon(data = world_map, aes(x = long, y = lat, group = group), 
+               fill = "white", color = "black") +
+  geom_point(data = youtube, aes(x = Longitude, y = Latitude, fill = Subscribers),
+             size = 3, shape = 21, color = "black") +
+  scale_fill_gradient(low = "blue", high = "red") + 
+  labs(title = "YouTube Data Set Map", x = "Longitude", y = "Latitude") +
+  theme_minimal() +
+  theme(legend.title = element_text(size = 12),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 14),
+        plot.title = element_text(face = "bold", hjust = 0.5, size = 16))
+```
+
+The purpose of creating a map using the YouTube dataset is to visualize geographic patterns and trends in the dataset. This geographic representation helps provide insight into the global distribution of YouTube data. It identifies areas with high or low numbers of users and provides a visual context for analyzing YouTube's global reach. Overall, the map provides a concise and informative way to understand the geographic aspects of the dataset.
+
+```{r}
+# Load libraries
+library(shiny)
+library(ggplot2)
+library(fmsb)
+library(plotly)
+
+# Shiny UI part
+ui <- fluidPage(
+  titlePanel("YouTube Data Visualization"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("plot_type", "Select Chart Type:",
+                  choices = c("Line Plot", "Pie Chart", "Density Plot")),
+      uiOutput("x_axis_selector")
+    ),
+    
+    mainPanel(
+      plotOutput("selected_plot")
+    )
+  )
+)
+
+# Shiny server part
+server <- function(input, output, session) {
+  
+  # Dynamically generate UI for X-axis selector.
+  output$x_axis_selector <- renderUI({
+    # Show different X-axis options based on chart type.
+    switch(input$plot_type,
+           "Line Plot" = {
+             line_cols <- c("Rank", "Uploads", "Lowest Monthly Earnings", "Highest Monthly Earnings", "Subscribers For Last 30 Days", "Video Views For The Last 30 Days")
+             selectInput("x_axis", "Select X-Axis:", choices = line_cols, selected = line_cols[1])
+           },
+           "Pie Chart" = {
+             pie_cols <- c("Category", "Country", "Channel Type")
+             selectInput("x_axis", "Select X-Axis:", choices = pie_cols, selected = pie_cols[1])
+           },
+           "Density Plot" = {
+             density_cols <- c("Rank", "Subscribers", "Uploads", "Population", "Latitude", "Longitude")
+             selectInput("x_axis", "Select X-Axis:", choices = density_cols, selected = density_cols[1])
+           })
+  })
+  
+  output$selected_plot <- renderPlot({
+    req(input$x_axis, youtube) # Check inputs and datasets for availability.
+    
+    # Delete NA values.
+    youtube <- na.omit(youtube[, c(input$x_axis), drop=FALSE])
+    
+    # Line Plot
+    if (input$plot_type == "Line Plot") {
+      if (input$x_axis %in% names(youtube)) {  # # Check for the existence of user-selected X-axis variables in the YouTube dataset.
+        p <- ggplot(youtube, aes(x = 1:nrow(youtube))) +
+          geom_line(aes(y = !!sym(input$x_axis)), color = "skyblue") +
+          labs(title = paste("Linear analysis of Subscribers and", input$x_axis),
+               x = input$x_axis, 
+               y = "Subscribers") +
+          theme_minimal() +
+          theme(
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 16), 
+            axis.title = element_text(size = 14),
+            axis.text = element_text(size = 12)
+          )
+        
+        print(p)
+        return(p)
+      }
+    }
+    
+    # Pie Chart
+    if (input$plot_type == "Pie Chart" && !is.null(input$x_axis)) {
+      selected_data <- youtube[[input$x_axis]]
+      if (is.character(selected_data) && !is.null(selected_data)) {
+        selected_data <- na.omit(selected_data)
+        category_counts <- table(selected_data)
+        if (length(category_counts) > 0) {
+          top_n <- 5
+          category_counts_sorted <- sort(category_counts, decreasing = TRUE) # Sort the number of categories.
+          
+          # If there are more than 5 categories, the others are categorized as "Others".
+          if (length(category_counts_sorted) > top_n) {
+            other_count <- sum(category_counts_sorted[(top_n + 1):length(category_counts_sorted)])
+            category_counts_top_n <- category_counts_sorted[1:top_n]
+            category_counts_top_n['Others'] <- other_count
+          } else {
+            category_counts_top_n <- category_counts_sorted
+          }
+          
+          # Calculate the percentage for each category.
+          category_percentage <- prop.table(category_counts_top_n) * 100
+          pie(category_percentage, 
+              labels = paste(round(category_percentage, 2), "%"), 
+              main = paste("Distribution of Top", top_n, input$x_axis),
+              col = rainbow(length(category_percentage)))
+          legend("topright", legend = names(category_counts_top_n), fill = rainbow(length(category_percentage)), title = "Top Categories")
+        }
+      }
+    }
+    
+    # Density Plot
+    if (input$plot_type == "Density Plot" && !is.null(input$x_axis)) {
+      selected_data <- youtube[[input$x_axis]]
+      if (is.numeric(selected_data) && !is.null(selected_data)) {
+        selected_data <- na.omit(selected_data)
+        ggplot(youtube, aes_string(x = input$x_axis)) +
+          geom_density(fill = "skyblue", alpha = 0.5) +
+          labs(title = paste("Density Plot of", input$x_axis),
+               x = input$x_axis, 
+               y = "Density") +
+          theme_minimal() +
+          theme(
+            plot.title = element_text(face = "bold", hjust = 0.5, size = 16),
+            axis.title = element_text(size = 14),
+            axis.text = element_text(size = 12)
+          )
+      }
+    }
+  })
+}
+
+# Run the shiny application 
+shinyApp(ui = ui, server = server)
+
+```
+
